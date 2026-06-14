@@ -1,0 +1,80 @@
+{
+  "name": "letter-email",
+  "version": "1.0.0",
+  "description": "Letter - a unified multi-account email client",
+  "main": "electron/main.js",
+  "homepage": "./",
+  "scripts": {
+    "start":        "react-scripts start",
+    "build":        "react-scripts build",
+    "electron":     "electron .",
+    "electron-dev": "concurrently \"cross-env BROWSER=none npm start\" \"wait-on http://localhost:3000 && electron .\"",
+    "pack":         "npm run build && electron-builder --dir",
+    "dist":         "npm run build && electron-builder",
+    "dist:mac":     "npm run build && electron-builder --mac",
+    "dist:win":     "npm run build && electron-builder --win",
+    "dist:linux":   "npm run build && electron-builder --linux",
+    "release":      "npm run build && electron-builder --mac --win --linux"
+  },
+  "build": {
+    "appId": "com.letter.email",
+    "productName": "Letter",
+    "files": [
+      "build/**/*",
+      "electron/**/*",
+      "node_modules/**/*"
+    ],
+    "directories": {
+      "buildResources": "public",
+      "output": "dist"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Briph",
+      "repo": "Letter-email",
+      "releaseType": "release"
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Network"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "dependencies": {
+    "cross-env":        "^7.0.3",
+    "electron-log":     "^5.1.2",
+    "electron-store":   "^8.1.0",
+    "electron-updater": "^6.1.7",
+    "react":            "^18.2.0",
+    "react-dom":        "^18.2.0",
+    "react-scripts":    "5.0.1"
+  },
+  "devDependencies": {
+    "concurrently":     "^8.2.0",
+    "electron":         "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "wait-on":          "^7.2.0"
+  },
+  "browserslist": {
+    "production": [">0.2%", "not dead", "not op_mini all"],
+    "development": ["last 1 chrome version"]
+  }
+}
