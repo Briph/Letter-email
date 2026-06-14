@@ -1,6 +1,6 @@
 {
   "name": "letter-email",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Letter - a unified multi-account email client",
   "main": "electron/main.js",
   "homepage": "./",
