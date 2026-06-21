@@ -43,6 +43,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // ── Platform info ────────────────────────────────────────────────────────
   platform:   process.platform,
-  appVersion: process.env.npm_package_version || "1.0.0",
+  appVersion: require("electron").ipcRenderer.sendSync("app:version"),
   isElectron: true,
 });

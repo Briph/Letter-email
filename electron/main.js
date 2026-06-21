@@ -186,6 +186,7 @@ function buildMenu() {
 }
 
 // ─── IPC: settings ───────────────────────────────────────────────────────────
+ipcMain.on("app:version", (e) => { e.returnValue = app.getVersion(); });
 ipcMain.handle("settings:get",   ()          => store.get("settings"));
 ipcMain.handle("settings:set",   (_, s)      => { store.set("settings", s); return true; });
 ipcMain.handle("settings:reset", ()          => { store.reset("settings"); return store.get("settings"); });
