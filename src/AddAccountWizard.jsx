@@ -88,8 +88,7 @@ export default function AddAccountWizard({ account, onDone, onCancel, dark }) {
         if (match) { selectProvider(match); }
       })
       .catch(() => {});
-  // selectProvider is stable (only uses state setters); account.email is the real dep
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line
   }, [account.email]);
 
   // ── Step 1: Provider picker ────────────────────────────────────────────────

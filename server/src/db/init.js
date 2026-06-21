@@ -5,7 +5,7 @@
  * Safe to re-run — uses IF NOT EXISTS.
  */
 
-const Database = require("better-sqlite3");
+const { DatabaseSync } = require("node:sqlite");
 const path     = require("path");
 const fs       = require("fs");
 require("dotenv").config({ path: path.join(__dirname, "../../.env") });
@@ -15,11 +15,11 @@ const DB_PATH = process.env.DB_PATH || "./data/letter.db";
 // Ensure data directory exists
 fs.mkdirSync(path.dirname(path.resolve(DB_PATH)), { recursive: true });
 
-const db = new Database(path.resolve(DB_PATH));
+const db = new DatabaseSync(path.resolve(DB_PATH));
 
 // Enable WAL mode for better concurrent read performance
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
+db.exec("PRAGMA journal_mode = WAL");
+db.exec("PRAGMA foreign_keys = ON");
 
 db.exec(`
   -- ── Users ──────────────────────────────────────────────────────────────

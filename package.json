@@ -5,10 +5,11 @@
   "main": "electron/main.js",
   "homepage": "./",
   "scripts": {
+    "postinstall":  "cd server && npm install",
     "start":        "react-scripts start",
     "build":        "react-scripts build",
     "electron":     "electron .",
-    "electron-dev": "concurrently \"cross-env BROWSER=none npm start\" \"wait-on http://localhost:3000 && electron .\"",
+    "electron-dev": "concurrently \"cd server && npm start\" \"cross-env BROWSER=none npm start\" \"wait-on http://localhost:3000 http://localhost:3001 && electron .\"",
     "pack":         "npm run build && electron-builder --dir",
     "dist":         "npm run build && electron-builder",
     "dist:mac":     "npm run build && electron-builder --mac",
@@ -24,9 +25,18 @@
       "electron/**/*",
       "node_modules/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "server",
+        "to": "server"
+      }
+    ],
     "directories": {
       "buildResources": "public",
       "output": "dist"
+    },
+    "extraMetadata": {
+      "main": "electron/main.js"
     },
     "publish": {
       "provider": "github",
@@ -72,6 +82,13 @@
     "electron":         "^28.0.0",
     "electron-builder": "^24.9.1",
     "wait-on":          "^7.2.0"
+  },
+  "eslintConfig": {
+    "extends": ["react-app"],
+    "plugins": ["react-hooks"],
+    "rules": {
+      "react-hooks/exhaustive-deps": "warn"
+    }
   },
   "browserslist": {
     "production": [">0.2%", "not dead", "not op_mini all"],

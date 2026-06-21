@@ -4,7 +4,7 @@
  * Runs schema init on first import.
  */
 
-const Database = require("better-sqlite3");
+const { DatabaseSync } = require("node:sqlite");
 const path = require("path");
 const fs   = require("fs");
 
@@ -19,9 +19,9 @@ let _db;
 function getDb() {
   if (_db) return _db;
 
-  _db = new Database(path.resolve(DB_PATH));
-  _db.pragma("journal_mode = WAL");
-  _db.pragma("foreign_keys = ON");
+  _db = new DatabaseSync(path.resolve(DB_PATH));
+  _db.exec("PRAGMA journal_mode = WAL");
+  _db.exec("PRAGMA foreign_keys = ON");
 
   // Run schema (idempotent)
   _db.exec(`

@@ -5,7 +5,6 @@ import HtmlEmailView from "./HtmlEmailView";
 import ContactsPanel from "./ContactsPanel";
 import RulesPanel, { applyRules } from "./RulesPanel";
 import TemplatesPanel from "./TemplatesPanel";
-import { useAuth } from "./AuthContext";
 import { accounts as accountsApi, labels as labelsApi, settings as settingsApi, mail as mailApi } from "./api";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -204,7 +203,7 @@ function ThreadView({ emails, threadId, acctMap, dark, onReply, onForward, fontS
       {thread.map((email,i)=>{
         const isLast=i===thread.length-1, isColl=collapsed.has(email.id), acct=acctMap[email.account];
         return (
-          <div key={email.id} style={{border:`1px solid ${bd}`,borderRadius:10,overflow:"hidden",background:bg}}>
+          <div key={email.id} style={{borderRadius:10,overflow:"hidden",background:bg}}>
             <div style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:10,cursor:isLast?"default":"pointer"}} onClick={()=>!isLast&&setCollapsed(p=>{const n=new Set(p);n.has(email.id)?n.delete(email.id):n.add(email.id);return n;})}>
               <AccountBadge account={acct} size={28}/>
               <div style={{flex:1,minWidth:0}}>
@@ -249,7 +248,7 @@ function ThreadView({ emails, threadId, acctMap, dark, onReply, onForward, fontS
 }
 
 // ─── Settings Panel ───────────────────────────────────────────────────────────
-function SettingsPanel({ prefs, setPrefs, accounts, setAccounts, labels, setLabels, emails, setEmails, acctFilter, setAcctFilter, T, dark, currentUser, onSignOut, onConnectAccount }) {
+function SettingsPanel({ prefs, setPrefs, accounts, setAccounts, labels, setLabels, emails, setEmails, acctFilter, setAcctFilter, T, dark, currentUser, onSignOut, onConnectAccount, onClose }) {
   const [tab, setTab]           = useState("accounts");
   const [addingAcct, setAddingAcct] = useState(false);
   const [addingLabel,setAddingLabel]= useState(false);
@@ -351,8 +350,13 @@ function SettingsPanel({ prefs, setPrefs, accounts, setAccounts, labels, setLabe
   return (
     <div style={{flex:1,display:"flex",overflow:"hidden"}}>
       {/* Settings sidebar */}
-      <div style={{width:180,background:T.panel,borderRight:`1px solid ${T.border}`,padding:"20px 8px",flexShrink:0,overflowY:"auto"}}>
-        <div style={{fontSize:11,fontWeight:600,color:T.sub,letterSpacing:"0.08em",textTransform:"uppercase",padding:"0 10px",marginBottom:10}}>Settings</div>
+      <div style={{width:180,background:T.panel,borderRight:`1px solid ${T.border}`,padding:"20px 8px",flexShrink:0,overflowY:"auto",display:"flex",flexDirection:"column"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 10px",marginBottom:10}}>
+          <div style={{fontSize:11,fontWeight:600,color:T.sub,letterSpacing:"0.08em",textTransform:"uppercase"}}>Settings</div>
+          <button onClick={onClose} title="Close settings" style={{background:"none",border:"none",cursor:"pointer",color:T.sub,padding:2,borderRadius:5,display:"flex",alignItems:"center",lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.color=T.text} onMouseLeave={e=>e.currentTarget.style.color=T.sub}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
         {TABS.map(t=>(
           <div key={t} onClick={()=>setTab(t)} style={{padding:"7px 10px",borderRadius:7,cursor:"pointer",fontSize:12,fontWeight:tab===t?600:400,color:tab===t?T.text:T.sub,background:tab===t?(dark?"#2a2a2a":"#e8e8e8"):"transparent",marginBottom:2,transition:"all 0.1s",textTransform:"capitalize"}}>
             {t}
@@ -684,7 +688,6 @@ function emailMatchesSearch(email, tokens) {
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App({ initialAccounts=null, initialLabels=[], initialSettings={}, currentUser=null }) {
-  const { signOut } = useAuth();
 
   const [accounts,   setAccounts]  = useState(()=> initialAccounts && initialAccounts.length > 0 ? initialAccounts : (initialAccounts === null ? INIT_ACCOUNTS : []));
   const [emails,     setEmails]    = useState(INIT_EMAILS);
@@ -1373,15 +1376,16 @@ export default function App({ initialAccounts=null, initialLabels=[], initialSet
           acctFilter={acctFilter} setAcctFilter={setAcctFilter}
           T={T} dark={dark}
           currentUser={currentUser}
-          onSignOut={(everywhere)=>signOut(everywhere)}
+          onSignOut={null}
           onConnectAccount={(a)=>setWizardAccount(a)}
+          onClose={()=>setView("list")}
         />}
         {showContacts&&<ContactsPanel contacts={contacts} setContacts={setContacts} emails={emails} dark={dark} T={T}/>}
         {showRules&&<RulesPanel rules={rules} setRules={setRules} labels={labels} dark={dark} T={T}/>}
         {showTemplates&&<TemplatesPanel templates={templates} setTemplates={setTemplates} dark={dark} T={T}/>}
 
         {/* EMAIL LIST */}
-        {!showSettings&&(
+        {!showSettings&&!showContacts&&!showRules&&!showTemplates&&(
           <div style={{
             width: pane==="right"&&hasDetail ? 320 : pane==="bottom"&&hasDetail ? "100%" : "100%",
             height: pane==="bottom"&&hasDetail ? "45%" : "auto",
@@ -1458,7 +1462,7 @@ export default function App({ initialAccounts=null, initialLabels=[], initialSet
         )}
 
         {/* DETAIL PANE — right or bottom */}
-        {!showSettings&&(pane==="right"||pane==="bottom")&&detailPane}
+        {!showSettings&&!showContacts&&!showRules&&!showTemplates&&(pane==="right"||pane==="bottom")&&detailPane}
       </div>
 
       {/* COMPOSE */}
@@ -1524,8 +1528,6 @@ export default function App({ initialAccounts=null, initialLabels=[], initialSet
                 </div>
               )}
               <button onClick={()=>{const a=accounts.find(x=>x.id===cFrom);setCSig(s=>{if(s){setCBody(b=>{const i=b.lastIndexOf("\n\n");return i>0?b.slice(0,i):b;});}else if(a?.signature){setCBody(b=>`${b}\n\n${a.signature}`);}return !s;});}} style={{background:cSig?(dark?"#333":"#e8e8e8"):"none",border:`1px solid ${T.border}`,borderRadius:6,padding:"3px 8px",fontSize:9,letterSpacing:"0.06em",cursor:"pointer",fontFamily:"inherit",color:cSig?T.text:T.sub,fontWeight:cSig?600:400}}>
-                {cSig?"✓ Sig":"+ Sig"}
-              </button>
                 {cSig?"✓ Sig":"+ Sig"}
               </button>
               <span style={{fontSize:9,color:T.sub,flex:1}}>{draftSaved?"Saved as draft":"Unsaved"}</span>

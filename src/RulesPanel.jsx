@@ -121,7 +121,7 @@ export default function RulesPanel({ rules, setRules, labels, dark, T }) {
         </div>
 
         <div style={{ marginTop:20 }}>
-          {(adding || editing) && {RuleForm()}}
+          {(adding || editing) && RuleForm()}
 
           {rules.length === 0 && !adding && (
             <div style={{ padding:40, textAlign:"center", color:T.sub, fontSize:13 }}>
@@ -155,7 +155,7 @@ export default function RulesPanel({ rules, setRules, labels, dark, T }) {
                   </div>
                 </div>
               )}
-              {editing === rule.id && {RuleForm()}}
+              {editing === rule.id && RuleForm()}
             </div>
           ))}
         </div>

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, Notification, nativeTheme, Menu, shell } = require("electron");
 const path   = require("path");
 const fs     = require("fs");
+const { spawn } = require("child_process");
 const Store  = require("electron-store");
 const { initUpdater, stopUpdater } = require("./updater");
 
@@ -30,6 +31,59 @@ const store = new Store({
 
 let mainWindow;
 const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
+
+// ─── Backend server ───────────────────────────────────────────────────────────
+let serverProcess = null;
+
+function startServer() {
+  const serverEntry = isDev
+    ? path.join(__dirname, "../server/src/index.js")
+    : path.join(process.resourcesPath, "server/src/index.js");
+
+  if (!fs.existsSync(serverEntry)) {
+    console.error("[main] Server entry not found:", serverEntry);
+    return;
+  }
+
+  // In production, generate stable secrets derived from the machine's app data path
+  // so they survive restarts but are unique per installation.
+  const dataDir = app.getPath("userData");
+  const secretsFile = path.join(dataDir, "secrets.json");
+  let secrets;
+  if (fs.existsSync(secretsFile)) {
+    secrets = JSON.parse(fs.readFileSync(secretsFile, "utf8"));
+  } else {
+    const crypto = require("crypto");
+    secrets = {
+      JWT_SECRET:          crypto.randomBytes(64).toString("hex"),
+      JWT_REFRESH_SECRET:  crypto.randomBytes(64).toString("hex"),
+      CREDENTIALS_SECRET:  crypto.randomBytes(32).toString("hex"),
+    };
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(secretsFile, JSON.stringify(secrets));
+  }
+
+  const env = {
+    ...process.env,
+    NODE_ENV:              isDev ? "development" : "production",
+    PORT:                  "3001",
+    DB_PATH:               path.join(dataDir, "letter.db"),
+    JWT_SECRET:            secrets.JWT_SECRET,
+    JWT_REFRESH_SECRET:    secrets.JWT_REFRESH_SECRET,
+    CREDENTIALS_SECRET:    secrets.CREDENTIALS_SECRET,
+    JWT_EXPIRES_IN:        "15m",
+    JWT_REFRESH_EXPIRES_IN:"30d",
+    CORS_ORIGINS:          "http://localhost:3000,file://",
+  };
+
+  serverProcess = spawn(process.execPath, [serverEntry], {
+    env,
+    stdio: isDev ? "inherit" : "ignore",
+  });
+
+  serverProcess.on("error", (err) => console.error("[server]", err.message));
+  serverProcess.on("exit",  (code) => { if (code !== 0) console.warn("[server] exited with code", code); });
+}
 
 // ─── Window ───────────────────────────────────────────────────────────────────
 function createWindow() {
@@ -154,10 +208,18 @@ ipcMain.handle("notify", (_, { title, body }) => {
 ipcMain.handle("theme:native", () => nativeTheme.shouldUseDarkColors);
 
 // ─── App lifecycle ───────────────────────────────────────────────────────────
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  startServer();
+  createWindow();
+});
 
 app.on("window-all-closed", () => {
+  if (serverProcess) { serverProcess.kill(); serverProcess = null; }
   if (process.platform !== "darwin") app.quit();
+});
+
+app.on("before-quit", () => {
+  if (serverProcess) { serverProcess.kill(); serverProcess = null; }
 });
 
 app.on("activate", () => {

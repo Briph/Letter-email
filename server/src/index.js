@@ -72,14 +72,15 @@ const apiLimiter = rateLimit({
 });
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-// Mount auth sub-routes with appropriate rate limits
+// Apply rate limiters before the auth router
 const authRouter = require("./routes/auth");
-app.post("/api/auth/signup",  strictAuthLimiter, (req,res,next) => authRouter(req,res,next));
-app.post("/api/auth/signin",  strictAuthLimiter, (req,res,next) => authRouter(req,res,next));
-app.post("/api/auth/refresh", softAuthLimiter,   (req,res,next) => authRouter(req,res,next));
-app.post("/api/auth/signout", softAuthLimiter,   (req,res,next) => authRouter(req,res,next));
-app.get("/api/auth/me",       softAuthLimiter,   (req,res,next) => authRouter(req,res,next));
-app.patch("/api/auth/me",     softAuthLimiter,   (req,res,next) => authRouter(req,res,next));
+app.post("/api/auth/signup",  strictAuthLimiter);
+app.post("/api/auth/signin",  strictAuthLimiter);
+app.post("/api/auth/refresh", softAuthLimiter);
+app.post("/api/auth/signout", softAuthLimiter);
+app.get( "/api/auth/me",      softAuthLimiter);
+app.patch("/api/auth/me",     softAuthLimiter);
+app.use("/api/auth", authRouter);
 
 // connectRouter MUST be mounted before accountsRouter so that
 // /api/accounts/:id/connect, /api/accounts/:id/test etc. are matched first.
