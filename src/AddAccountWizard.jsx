@@ -13,6 +13,18 @@ import { useState, useEffect, useRef } from "react";
 // Providers that support OAuth2 (in addition to App Password)
 const OAUTH_PROVIDERS = new Set(["gmail", "outlook"]);
 
+const STATIC_PROVIDERS = [
+  { key: "gmail",      name: "Gmail",             domains: ["gmail.com", "googlemail.com"],                    imap: { host: "imap.gmail.com",             port: 993, tls: true  }, smtp: { host: "smtp.gmail.com",             port: 587, secure: false }, authNote: "Use an App Password — not your Google account password.\nGenerate one at: myaccount.google.com/apppasswords\n(Requires 2-Step Verification to be enabled.)", docsUrl: "https://support.google.com/accounts/answer/185833" },
+  { key: "outlook",   name: "Outlook / Hotmail",  domains: ["outlook.com","hotmail.com","live.com","msn.com"], imap: { host: "outlook.office365.com",       port: 993, tls: true  }, smtp: { host: "smtp.office365.com",         port: 587, secure: false }, authNote: "Use your regular Microsoft account password.\nIf you use two-factor auth, generate an App Password at:\naccount.microsoft.com/security",                                  docsUrl: "https://support.microsoft.com/en-us/office/pop-imap-and-smtp-settings-8361e398-8af4-4e97-b147-6c6c4ac95353" },
+  { key: "yahoo",     name: "Yahoo Mail",          domains: ["yahoo.com","yahoo.co.uk","yahoo.com.au","ymail.com"], imap: { host: "imap.mail.yahoo.com",    port: 993, tls: true  }, smtp: { host: "smtp.mail.yahoo.com",        port: 587, secure: false }, authNote: "Yahoo requires an App Password.\nGenerate one at: login.yahoo.com/account/security",                                                                              docsUrl: "https://help.yahoo.com/kb/generate-third-party-passwords-sln15241.html" },
+  { key: "icloud",    name: "iCloud Mail",         domains: ["icloud.com","me.com","mac.com"],                  imap: { host: "imap.mail.me.com",           port: 993, tls: true  }, smtp: { host: "smtp.mail.me.com",           port: 587, secure: false }, authNote: "iCloud requires an App-Specific Password.\nGenerate one at: appleid.apple.com → Sign-In and Security → App-Specific Passwords.",                                    docsUrl: "https://support.apple.com/en-us/102654" },
+  { key: "aol",       name: "AOL Mail",            domains: ["aol.com"],                                        imap: { host: "imap.aol.com",               port: 993, tls: true  }, smtp: { host: "smtp.aol.com",               port: 587, secure: false }, authNote: "AOL requires an App Password.\nGenerate one at: login.aol.com → Account Security → Generate app password.",                                                         docsUrl: "https://help.aol.com/articles/create-and-manage-app-password" },
+  { key: "zoho",      name: "Zoho Mail",           domains: ["zoho.com","zohomail.com"],                        imap: { host: "imap.zoho.com",              port: 993, tls: true  }, smtp: { host: "smtp.zoho.com",              port: 587, secure: false }, authNote: "Use your Zoho Mail password. If 2FA is enabled, generate an App Password in your Zoho account security settings.",                                                docsUrl: "https://www.zoho.com/mail/help/imap-access.html" },
+  { key: "fastmail",  name: "Fastmail",            domains: ["fastmail.com","fastmail.fm"],                     imap: { host: "imap.fastmail.com",          port: 993, tls: true  }, smtp: { host: "smtp.fastmail.com",          port: 587, secure: false }, authNote: "Use an App Password from Fastmail → Settings → Privacy & Security → App Passwords.",                                                                           docsUrl: "https://www.fastmail.help/hc/en-us/articles/360058752834" },
+  { key: "protonmail",name: "Proton Mail",         domains: ["proton.me","protonmail.com","pm.me"],             imap: { host: "127.0.0.1",                  port: 1143, tls: false }, smtp: { host: "127.0.0.1",                 port: 1025, secure: false }, authNote: "Proton Mail requires the Proton Mail Bridge app to be running.\nDownload it at: proton.me/mail/bridge",                                                         docsUrl: "https://proton.me/support/protonmail-bridge-install" },
+  { key: "manual",    name: "Other / Manual IMAP", domains: [],                                                 imap: { host: "",                           port: 993, tls: true  }, smtp: { host: "",                           port: 587, secure: false }, authNote: "Enter your server settings manually.", docsUrl: null },
+];
+
 const PROVIDER_ICONS = {
   gmail:      { emoji: "🔴", label: "Gmail" },
   outlook:    { emoji: "🔵", label: "Outlook / Hotmail" },
@@ -83,19 +95,12 @@ export default function AddAccountWizard({ account, onDone, onCancel, dark }) {
     setError("");
   };
 
-  // Fetch provider list on mount
+  // Load providers from static list and auto-detect from email domain
   useEffect(() => {
-    fetch(`${process.env.REACT_APP_API_URL || "http://localhost:3001/api"}/providers`)
-      .then(r => r.json())
-      .then(d => {
-        const list = d.providers || [];
-        list.push({ key: "manual", name: "Other / Manual IMAP", domains: [], authNote: "Enter your server settings manually.", docsUrl: null, imap: { host:"", port:993, tls:true }, smtp: { host:"", port:587, secure:false } });
-        setProviders(list);
-        const domain = account.email.split("@")[1]?.toLowerCase();
-        const match  = list.find(p => p.domains?.includes(domain));
-        if (match) { selectProvider(match); }
-      })
-      .catch(() => {});
+    setProviders(STATIC_PROVIDERS);
+    const domain = account.email.split("@")[1]?.toLowerCase();
+    const match  = STATIC_PROVIDERS.find(p => p.domains?.includes(domain));
+    if (match) selectProvider(match);
   // eslint-disable-next-line
   }, [account.email]);
 
