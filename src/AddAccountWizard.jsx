@@ -148,10 +148,8 @@ export default function AddAccountWizard({ account, onDone, onCancel, dark }) {
   async function handleOAuth() {
     setError(""); setOauthPending(true);
     try {
-      const token = localStorage.getItem("letter_access");
       const r = await fetch(
-        `${process.env.REACT_APP_API_URL || "http://localhost:3001/api"}/oauth/start?provider=${selected}&accountId=${account.id}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        `${process.env.REACT_APP_API_URL || "http://localhost:3001/api"}/oauth/start?provider=${selected}&accountId=${account.id}`
       );
       const data = await r.json();
       if (!r.ok) { setError(data.error || "Could not start OAuth"); setOauthPending(false); return; }
@@ -163,10 +161,8 @@ export default function AddAccountWizard({ account, onDone, onCancel, dark }) {
       // Poll the server for completion every 2 seconds
       pollRef.current = setInterval(async () => {
         try {
-          const t = localStorage.getItem("letter_access");
           const pr = await fetch(
-            `${process.env.REACT_APP_API_URL || "http://localhost:3001/api"}/oauth/status/${data.state}`,
-            { headers: { Authorization: `Bearer ${t}` } }
+            `${process.env.REACT_APP_API_URL || "http://localhost:3001/api"}/oauth/status/${data.state}`
           );
           const pd = await pr.json();
           if (pd.error) {

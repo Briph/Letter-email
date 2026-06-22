@@ -11,7 +11,6 @@ const express      = require("express");
 const https        = require("https");
 const { randomBytes } = require("crypto");
 const { getDb }    = require("../db");
-const { requireAuth } = require("../middleware/auth");
 const { encrypt, decrypt } = require("../utils/crypto");
 
 const router = express.Router();
@@ -42,12 +41,15 @@ const PROVIDERS = {
 function getProvider(key) { return PROVIDERS[key] || null; }
 
 // ── GET /api/oauth/start ──────────────────────────────────────────────────────
-router.get("/start", requireAuth, (req, res) => {
+router.get("/start", (req, res) => {
   const { provider: provKey, accountId } = req.query;
   const prov = getProvider(provKey);
 
   if (!prov) {
     return res.status(400).json({ error: "Unknown provider. Use 'gmail' or 'outlook'." });
+  }
+  if (!accountId) {
+    return res.status(400).json({ error: "accountId is required" });
   }
   if (!prov.clientId()) {
     const envPrefix = provKey === "gmail" ? "GOOGLE" : "MICROSOFT";
@@ -56,18 +58,13 @@ router.get("/start", requireAuth, (req, res) => {
     });
   }
 
-  const db = getDb();
-  const account = db.prepare(
-    "SELECT * FROM email_accounts WHERE id = ? AND user_id = ?"
-  ).get(accountId, req.user.id);
-  if (!account) return res.status(404).json({ error: "Account not found" });
-
   // Generate a random state token to link the callback back to this request
   const state = randomBytes(24).toString("hex");
+  const db = getDb();
   db.prepare(`
     INSERT INTO oauth_pending (state, account_id, user_id, provider, created_at)
     VALUES (?, ?, ?, ?, unixepoch())
-  `).run(state, accountId, req.user.id, provKey);
+  `).run(state, accountId, "local", provKey);
 
   const params = new URLSearchParams({
     client_id:     prov.clientId(),
@@ -141,11 +138,11 @@ router.get("/callback", async (req, res) => {
 });
 
 // ── GET /api/oauth/status/:state ──────────────────────────────────────────────
-router.get("/status/:state", requireAuth, (req, res) => {
+router.get("/status/:state", (req, res) => {
   const db = getDb();
   const pending = db.prepare(
-    "SELECT * FROM oauth_pending WHERE state = ? AND user_id = ?"
-  ).get(req.params.state, req.user.id);
+    "SELECT * FROM oauth_pending WHERE state = ?"
+  ).get(req.params.state);
 
   if (!pending) return res.status(404).json({ error: "State not found" });
   if (pending.error) return res.json({ done: false, error: pending.error });
