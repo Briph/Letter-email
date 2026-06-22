@@ -6,7 +6,7 @@
  * POST /api/accounts/:id/sync         — trigger a manual sync
  * POST /api/accounts/:id/disconnect   — remove credentials, keep account display config
  * GET  /api/providers                 — list known provider presets (public)
- * GET  /api/messages                  — fetch messages for the authed user
+ * GET  /api/messages                  — fetch all messages
  * PATCH /api/messages/:id             — update message flags (read/starred/folder)
  * POST /api/messages/send             — send a message via SMTP
  */
@@ -14,7 +14,6 @@
 const express   = require("express");
 const { v4: uuidv4 } = require("uuid");
 const { getDb }      = require("../db");
-const { requireAuth }= require("../middleware/auth");
 const { encrypt, decrypt } = require("../utils/crypto");
 const { testImapConnection, syncAccount } = require("../services/imap");
 const { testSmtpConnection, sendFromAccount } = require("../services/smtp");
@@ -22,31 +21,22 @@ const { listProviders, detectProvider, getProvider } = require("../utils/provide
 
 const router = express.Router();
 
-// ── GET /api/providers (public — no auth needed) ──────────────────────────────
+// ── GET /api/providers ────────────────────────────────────────────────────────
 router.get("/providers", (req, res) => {
   res.json({ providers: listProviders() });
 });
 
-// All routes below require auth
-router.use(requireAuth);
-
 // ── POST /api/accounts/:id/test ───────────────────────────────────────────────
-// Test IMAP + SMTP without saving. Returns { imap: ok, smtp: ok, errors: [] }
 router.post("/accounts/:id/test", async (req, res) => {
-  const db      = getDb();
-  const account = db.prepare(
-    "SELECT * FROM email_accounts WHERE id = ? AND user_id = ?"
-  ).get(req.params.id, req.user.id);
-  if (!account) return res.status(404).json({ error: "Account not found" });
-
-  const { imap, smtp } = req.body;
+  const { imap, smtp, email } = req.body;
   if (!imap || !smtp) return res.status(400).json({ error: "imap and smtp configs required" });
 
+  const accountEmail = email || req.params.id;
   const results = { imapOk: false, smtpOk: false, imapError: null, smtpError: null };
 
   await Promise.all([
     testImapConnection({
-      user:     imap.user || account.email,
+      user:     imap.user || accountEmail,
       password: imap.password,
       host:     imap.host,
       port:     imap.port || 993,
@@ -55,7 +45,7 @@ router.post("/accounts/:id/test", async (req, res) => {
       .catch(e => { results.imapError = e.message; }),
 
     testSmtpConnection({
-      user:     smtp.user || account.email,
+      user:     smtp.user || accountEmail,
       password: smtp.password,
       host:     smtp.host,
       port:     smtp.port || 587,
@@ -68,20 +58,29 @@ router.post("/accounts/:id/test", async (req, res) => {
 });
 
 // ── POST /api/accounts/:id/connect ───────────────────────────────────────────
-// Save credentials, test them, then do first sync.
 router.post("/accounts/:id/connect", async (req, res) => {
-  const db      = getDb();
-  const account = db.prepare(
-    "SELECT * FROM email_accounts WHERE id = ? AND user_id = ?"
-  ).get(req.params.id, req.user.id);
-  if (!account) return res.status(404).json({ error: "Account not found" });
+  const accountId = req.params.id;
+  const { imap, smtp, folderMap, email, name, color } = req.body;
 
-  const { imap, smtp, folderMap } = req.body;
   if (!imap?.password || !smtp?.password) {
     return res.status(400).json({ error: "imap.password and smtp.password are required" });
   }
 
-  // Auto-detect provider if not specified
+  const db = getDb();
+
+  // Upsert the account so credentials can be stored against it
+  const accountEmail = email || accountId;
+  const accountName  = name  || accountEmail.split("@")[0];
+  db.prepare(`
+    INSERT INTO email_accounts (id, user_id, name, email, color, provider, connected)
+    VALUES (?, 'local', ?, ?, ?, 'manual', 0)
+    ON CONFLICT(id) DO UPDATE SET
+      name  = excluded.name,
+      email = excluded.email
+  `).run(accountId, accountName, accountEmail, color || "#aec6e8");
+
+  const account = db.prepare("SELECT * FROM email_accounts WHERE id = ?").get(accountId);
+
   const providerKey  = req.body.provider || detectProvider(account.email) || "manual";
   const providerConf = getProvider(providerKey);
 
@@ -156,7 +155,6 @@ router.post("/accounts/:id/connect", async (req, res) => {
     smtpConfig.host, smtpConfig.port, smtpConfig.secure ? 1 : 0, smtpConfig.user, smtpEnc,
   );
 
-  // Mark account as connected
   db.prepare(`
     UPDATE email_accounts SET connected = 1, provider = ?, updated_at = unixepoch() WHERE id = ?
   `).run(providerKey, account.id);
@@ -173,9 +171,7 @@ router.post("/accounts/:id/connect", async (req, res) => {
 // ── POST /api/accounts/:id/sync ───────────────────────────────────────────────
 router.post("/accounts/:id/sync", async (req, res) => {
   const db      = getDb();
-  const account = db.prepare(
-    "SELECT * FROM email_accounts WHERE id = ? AND user_id = ?"
-  ).get(req.params.id, req.user.id);
+  const account = db.prepare("SELECT * FROM email_accounts WHERE id = ?").get(req.params.id);
   if (!account) return res.status(404).json({ error: "Account not found" });
   if (!account.connected) return res.status(422).json({ error: "Account not connected" });
 
@@ -189,40 +185,29 @@ router.post("/accounts/:id/sync", async (req, res) => {
 
 // ── POST /api/accounts/:id/disconnect ────────────────────────────────────────
 router.post("/accounts/:id/disconnect", (req, res) => {
-  const db      = getDb();
-  const account = db.prepare(
-    "SELECT * FROM email_accounts WHERE id = ? AND user_id = ?"
-  ).get(req.params.id, req.user.id);
-  if (!account) return res.status(404).json({ error: "Account not found" });
-
-  db.prepare("DELETE FROM imap_credentials WHERE account_id = ?").run(account.id);
-  db.prepare("DELETE FROM smtp_credentials WHERE account_id = ?").run(account.id);
+  const db = getDb();
+  db.prepare("DELETE FROM imap_credentials WHERE account_id = ?").run(req.params.id);
+  db.prepare("DELETE FROM smtp_credentials WHERE account_id = ?").run(req.params.id);
   if (req.body.deleteMessages) {
-    db.prepare("DELETE FROM messages WHERE account_id = ?").run(account.id);
+    db.prepare("DELETE FROM messages WHERE account_id = ?").run(req.params.id);
   }
-  db.prepare("UPDATE email_accounts SET connected = 0, updated_at = unixepoch() WHERE id = ?").run(account.id);
-
+  db.prepare("UPDATE email_accounts SET connected = 0, updated_at = unixepoch() WHERE id = ?").run(req.params.id);
   res.json({ ok: true });
 });
 
 // ── GET /api/messages ─────────────────────────────────────────────────────────
-// Query params: folder, accountId, limit, offset, unread, starred, search
 router.get("/messages", (req, res) => {
-  const db     = getDb();
-  const userId = req.user.id;
+  const db = getDb();
   const {
     folder, accountId, limit = 100, offset = 0,
     unread, starred, search, threadId,
   } = req.query;
 
-  // Validate account belongs to user
   let accountIds;
   if (accountId) {
-    const acct = db.prepare("SELECT id FROM email_accounts WHERE id = ? AND user_id = ?").get(accountId, userId);
-    if (!acct) return res.status(403).json({ error: "Account not found" });
     accountIds = [accountId];
   } else {
-    accountIds = db.prepare("SELECT id FROM email_accounts WHERE user_id = ?").all(userId).map(a => a.id);
+    accountIds = db.prepare("SELECT id FROM email_accounts WHERE user_id = 'local'").all().map(a => a.id);
   }
 
   if (!accountIds.length) return res.json({ messages: [], total: 0 });
@@ -231,19 +216,17 @@ router.get("/messages", (req, res) => {
   const params = [...accountIds];
   const where  = [`account_id IN (${placeholders})`];
 
-  if (folder)   { where.push("folder = ?");     params.push(folder); }
+  if (folder)         { where.push("folder = ?");      params.push(folder); }
   if (unread === "1") { where.push("is_unread = 1"); }
   if (starred === "1"){ where.push("is_starred = 1"); }
-  if (threadId) { where.push("thread_id = ?");  params.push(threadId); }
+  if (threadId)       { where.push("thread_id = ?");   params.push(threadId); }
   if (search) {
     where.push("(subject LIKE ? OR from_name LIKE ? OR from_email LIKE ? OR preview LIKE ?)");
     const q = `%${search}%`;
     params.push(q, q, q, q);
   }
 
-  const whereStr  = where.join(" AND ");
-  // Bug 4 fix: use separate param arrays for COUNT and data queries
-  // so that pushing limit/offset doesn't affect the count params
+  const whereStr   = where.join(" AND ");
   const countParams = [...params];
   const dataParams  = [...params, Number(limit), Number(offset)];
 
@@ -258,21 +241,16 @@ router.get("/messages", (req, res) => {
 // ── PATCH /api/messages/:id ───────────────────────────────────────────────────
 router.patch("/messages/:id", (req, res) => {
   const db  = getDb();
-  const msg = db.prepare(`
-    SELECT m.* FROM messages m
-    JOIN email_accounts a ON a.id = m.account_id
-    WHERE m.id = ? AND a.user_id = ?
-  `).get(req.params.id, req.user.id);
-
+  const msg = db.prepare("SELECT * FROM messages WHERE id = ?").get(req.params.id);
   if (!msg) return res.status(404).json({ error: "Message not found" });
 
   const { folder, isUnread, isStarred, labels } = req.body;
   const updates = [], params = [];
 
-  if (folder    !== undefined) { updates.push("folder = ?");     params.push(folder); }
-  if (isUnread  !== undefined) { updates.push("is_unread = ?");  params.push(isUnread ? 1 : 0); }
-  if (isStarred !== undefined) { updates.push("is_starred = ?"); params.push(isStarred ? 1 : 0); }
-  if (labels    !== undefined) { updates.push("labels_json = ?");params.push(JSON.stringify(labels)); }
+  if (folder    !== undefined) { updates.push("folder = ?");      params.push(folder); }
+  if (isUnread  !== undefined) { updates.push("is_unread = ?");   params.push(isUnread ? 1 : 0); }
+  if (isStarred !== undefined) { updates.push("is_starred = ?");  params.push(isStarred ? 1 : 0); }
+  if (labels    !== undefined) { updates.push("labels_json = ?"); params.push(JSON.stringify(labels)); }
 
   if (!updates.length) return res.json({ message: msgToClient(msg) });
 
@@ -285,25 +263,22 @@ router.patch("/messages/:id", (req, res) => {
 
 // ── POST /api/messages/send ───────────────────────────────────────────────────
 router.post("/messages/send", async (req, res) => {
-  const { accountId, to, cc, bcc, subject, text, html, scheduledFor } = req.body;
+  const { accountId, to, cc, bcc, subject, text, html } = req.body;
   if (!accountId || !to || !subject) {
     return res.status(400).json({ error: "accountId, to, and subject are required" });
   }
 
   const db      = getDb();
-  const account = db.prepare(
-    "SELECT * FROM email_accounts WHERE id = ? AND user_id = ?"
-  ).get(accountId, req.user.id);
+  const account = db.prepare("SELECT * FROM email_accounts WHERE id = ?").get(accountId);
   if (!account) return res.status(404).json({ error: "Account not found" });
   if (!account.connected) return res.status(422).json({ error: "Account not connected — configure IMAP/SMTP first" });
 
   try {
     const info = await sendFromAccount(accountId, db, {
-      from:    `${account.name} <${account.email}>`,
+      from: `${account.name} <${account.email}>`,
       to, cc, bcc, subject, text, html,
     });
 
-    // Store in Sent
     const msgId = uuidv4();
     db.prepare(`
       INSERT INTO messages
@@ -330,42 +305,41 @@ router.post("/messages/send", async (req, res) => {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function dbToClient(row) {
   return {
-    id:         row.id,
-    name:       row.name,
-    email:      row.email,
-    color:      row.color,
-    isDefault:  !!row.is_default,
-    signature:  row.signature,
-    sortOrder:  row.sort_order,
-    provider:   row.provider,
-    connected:  !!row.connected,
-    createdAt:  row.created_at,
-    updatedAt:  row.updated_at,
+    id:        row.id,
+    name:      row.name,
+    email:     row.email,
+    color:     row.color,
+    isDefault: !!row.is_default,
+    signature: row.signature,
+    sortOrder: row.sort_order,
+    provider:  row.provider,
+    connected: !!row.connected,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
 function msgToClient(row) {
-  let attachments = [];
-  let labels = [];
+  let attachments = [], labels = [];
   try { attachments = JSON.parse(row.attachments_json || "[]"); } catch {}
   try { labels      = JSON.parse(row.labels_json      || "[]"); } catch {}
   return {
-    id:           row.id,
-    accountId:    row.account_id,
-    folder:       row.folder,
-    messageId:    row.message_id,
-    from:         row.from_name,
-    fromEmail:    row.from_email,
-    to:           row.to_addr,
-    cc:           row.cc_addr,
-    subject:      row.subject,
-    preview:      row.preview,
-    body:         row.body,
-    bodyHtml:     row.body_html,
-    date:         row.date_sent,
-    unread:       !!row.is_unread,
-    starred:      !!row.is_starred,
-    hasAttachment:!!row.has_attachment,
+    id:             row.id,
+    accountId:      row.account_id,
+    folder:         row.folder,
+    messageId:      row.message_id,
+    from:           row.from_name,
+    fromEmail:      row.from_email,
+    to:             row.to_addr,
+    cc:             row.cc_addr,
+    subject:        row.subject,
+    preview:        row.preview,
+    body:           row.body,
+    bodyHtml:       row.body_html,
+    date:           row.date_sent,
+    unread:         !!row.is_unread,
+    starred:        !!row.is_starred,
+    hasAttachment:  !!row.has_attachment,
     attachments,
     labels,
     threadId:       row.thread_id,
@@ -374,7 +348,6 @@ function msgToClient(row) {
   };
 }
 
-// Provider-specific default folder names
 function getSentFolder(key) {
   const map = { gmail:"[Gmail]/Sent Mail", outlook:"Sent Items", yahoo:"Sent", icloud:"Sent Messages" };
   return map[key] || "Sent";

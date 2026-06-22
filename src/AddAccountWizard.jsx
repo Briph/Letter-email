@@ -202,13 +202,13 @@ export default function AddAccountWizard({ account, onDone, onCancel, dark }) {
   async function handleTest() {
     setError(""); setTestResult(null); setTesting(true);
     try {
-      const token = localStorage.getItem("letter_access");
       const r = await fetch(
         `${process.env.REACT_APP_API_URL || "http://localhost:3001/api"}/accounts/${account.id}/test`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            email: account.email,
             imap: { host: imapHost, port: Number(imapPort), tls: imapTls, password },
             smtp: { host: smtpHost, port: Number(smtpPort), secure: smtpSecure, password: samePass ? password : smtpPass },
           }),
@@ -227,13 +227,15 @@ export default function AddAccountWizard({ account, onDone, onCancel, dark }) {
     if (!password) { setError("Password is required"); return; }
     setError(""); setConnecting(true);
     try {
-      const token = localStorage.getItem("letter_access");
       const r = await fetch(
         `${process.env.REACT_APP_API_URL || "http://localhost:3001/api"}/accounts/${account.id}/connect`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            email: account.email,
+            name:  account.name,
+            color: account.color,
             provider: selected,
             imap: { host: imapHost, port: Number(imapPort), tls: imapTls, password },
             smtp: { host: smtpHost, port: Number(smtpPort), secure: smtpSecure, password: samePass ? password : smtpPass },
