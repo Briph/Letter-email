@@ -67,13 +67,15 @@ autoUpdater.on("update-downloaded", (info) => {
 autoUpdater.on("error", (err) => {
   log.error("[updater] Error:", err.message);
   // Silence expected non-fatal errors so the UI doesn't show a scary error
+  const msg = (err.message || "").toLowerCase();
   const silent =
-    err.message.includes("net::")         ||  // network unavailable
-    err.message.includes("ENOTFOUND")     ||  // DNS failure / offline
-    err.message.includes("ECONNREFUSED")  ||  // no connection
-    err.message.includes("404")           ||  // no releases published yet
-    err.message.includes("No published")  ||  // "No published versions on GitHub"
-    err.message.includes("latest.yml");       // release exists but missing metadata
+    msg.includes("net::")             ||  // network unavailable
+    msg.includes("enotfound")         ||  // DNS failure / offline
+    msg.includes("econnrefused")      ||  // no connection
+    msg.includes("404")               ||  // no releases published yet
+    msg.includes("no published")      ||  // "No published versions on GitHub"
+    msg.includes("latest.yml")        ||  // release exists but missing metadata
+    msg.includes("github")            ;   // catch-all for any other GitHub API errors
   send("updater:status", {
     type:    "error",
     message: silent ? null : err.message,
