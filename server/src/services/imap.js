@@ -10,25 +10,48 @@ const Imap             = require("imap");
 const { simpleParser } = require("mailparser");
 const { decrypt }      = require("../utils/crypto");
 const { randomUUID }   = require("crypto");
+const { getValidAccessToken } = require("../routes/oauth");
 
 // ── Low-level IMAP helpers ────────────────────────────────────────────────────
 
 /**
+ * Build an XOAUTH2 bearer string for the imap package.
+ * Format: base64("user=<email>\x01auth=Bearer <token>\x01\x01")
+ */
+function buildXOAuth2String(email, accessToken) {
+  return Buffer.from(`user=${email}\x01auth=Bearer ${accessToken}\x01\x01`).toString("base64");
+}
+
+/**
  * Open an IMAP connection and return a promise that resolves with the client.
+ * Supports both password auth and OAuth2 (XOAUTH2).
  * The caller is responsible for calling imap.end() when done.
  */
 function openImap(config) {
   return new Promise((resolve, reject) => {
-    const imap = new Imap({
-      user:          config.user,
-      password:      config.password,
-      host:          config.host,
-      port:          config.port || 993,
-      tls:           config.tls !== false,
-      tlsOptions:    { rejectUnauthorized: config.tls !== false },
-      connTimeout:   15000,
-      authTimeout:   10000,
-    });
+    // Build imap options: use xoauth2 if an access token is provided, else password
+    const imapOpts = config.accessToken
+      ? {
+          xoauth2:    buildXOAuth2String(config.user, config.accessToken),
+          host:       config.host,
+          port:       config.port || 993,
+          tls:        config.tls !== false,
+          tlsOptions: { rejectUnauthorized: config.tls !== false },
+          connTimeout: 15000,
+          authTimeout: 10000,
+        }
+      : {
+          user:        config.user,
+          password:    config.password,
+          host:        config.host,
+          port:        config.port || 993,
+          tls:         config.tls !== false,
+          tlsOptions:  { rejectUnauthorized: config.tls !== false },
+          connTimeout: 15000,
+          authTimeout: 10000,
+        };
+
+    const imap = new Imap(imapOpts);
 
     imap.once("ready", () => {
       // Bug 5 fix: attach a persistent error handler so post-resolve errors
@@ -186,29 +209,61 @@ async function fetchRecentMessages(config, options = {}) {
 /**
  * Sync a single account — fetch recent messages across standard mailboxes
  * and upsert them into the messages table.
+ * Supports both password-based and OAuth2 (XOAUTH2) auth.
  */
 async function syncAccount(accountId, db) {
-  const cred = db.prepare(
-    "SELECT * FROM imap_credentials WHERE account_id = ?"
-  ).get(accountId);
+  // Check for OAuth tokens first
+  const account = db.prepare("SELECT * FROM email_accounts WHERE id = ?").get(accountId);
+  if (!account) throw new Error("Account not found");
 
-  if (!cred) throw new Error("No IMAP credentials for this account");
+  const oauthToken = await getValidAccessToken(accountId, account.provider, db).catch(() => null);
 
-  const config = {
-    user:     cred.imap_user,
-    password: decrypt(cred.imap_password_enc),
-    host:     cred.imap_host,
-    port:     cred.imap_port,
-    tls:      !!cred.imap_tls,
+  let config;
+  if (oauthToken) {
+    // OAuth2 path — no password needed
+    const oauthRow = db.prepare("SELECT * FROM oauth_tokens WHERE account_id = ?").get(accountId);
+    // Determine IMAP host from provider
+    const imapHosts = { gmail: "imap.gmail.com", outlook: "outlook.office365.com" };
+    const host = imapHosts[account.provider] || "imap.gmail.com";
+    config = {
+      user:        account.email,
+      accessToken: oauthToken,
+      host,
+      port:        993,
+      tls:         true,
+    };
+  } else {
+    // Password / App Password path
+    const cred = db.prepare("SELECT * FROM imap_credentials WHERE account_id = ?").get(accountId);
+    if (!cred) throw new Error("No IMAP credentials for this account. Connect via OAuth or enter your App Password.");
+    config = {
+      user:     cred.imap_user,
+      password: decrypt(cred.imap_password_enc),
+      host:     cred.imap_host,
+      port:     cred.imap_port,
+      tls:      !!cred.imap_tls,
+    };
+  }
+
+  // Default folder names per provider
+  const providerFolders = {
+    gmail:   { sent: "[Gmail]/Sent Mail", drafts: "[Gmail]/Drafts", trash: "[Gmail]/Trash", spam: "[Gmail]/Spam" },
+    outlook: { sent: "Sent Items",        drafts: "Drafts",          trash: "Deleted Items", spam: "Junk Email" },
   };
+  const fallback = providerFolders[account.provider] || providerFolders.gmail;
+
+  // Use stored folder overrides if available (password path), else use provider defaults
+  const cred = !oauthToken
+    ? db.prepare("SELECT * FROM imap_credentials WHERE account_id = ?").get(accountId)
+    : null;
 
   // Map standard mailbox names to Letter folder names
   const mailboxMap = [
-    { imap: "INBOX",         folder: "Inbox"   },
-    { imap: cred.sent_folder   || "[Gmail]/Sent Mail", folder: "Sent"    },
-    { imap: cred.drafts_folder || "[Gmail]/Drafts",    folder: "Drafts"  },
-    { imap: cred.trash_folder  || "[Gmail]/Trash",     folder: "Trash"   },
-    { imap: cred.spam_folder   || "[Gmail]/Spam",      folder: "Archive" },
+    { imap: "INBOX",                                                    folder: "Inbox"   },
+    { imap: cred?.sent_folder   || fallback.sent,                       folder: "Sent"    },
+    { imap: cred?.drafts_folder || fallback.drafts,                     folder: "Drafts"  },
+    { imap: cred?.trash_folder  || fallback.trash,                      folder: "Trash"   },
+    { imap: cred?.spam_folder   || fallback.spam,                       folder: "Archive" },
   ];
 
   const errors = [];
@@ -278,10 +333,14 @@ async function syncAccount(accountId, db) {
     }
   }
 
-  // Update last-sync timestamp
+  // Update last-sync timestamp (only if imap_credentials row exists)
   db.prepare(`
     UPDATE imap_credentials SET last_synced = unixepoch() WHERE account_id = ?
   `).run(accountId);
+  // Also bump email_accounts.updated_at so the UI knows a sync happened
+  db.prepare(
+    "UPDATE email_accounts SET updated_at = unixepoch() WHERE id = ?"
+  ).run(accountId);
 
   return { synced: totalSynced, errors };
 }

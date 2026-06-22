@@ -5,19 +5,22 @@
 
 const nodemailer = require("nodemailer");
 const { decrypt } = require("../utils/crypto");
+const { getValidAccessToken } = require("../routes/oauth");
 
 /**
  * Build a nodemailer transport from raw config.
+ * Supports both password auth and OAuth2 (pass accessToken to use XOAUTH2).
  */
 function createTransport(config) {
+  const auth = config.accessToken
+    ? { type: "OAuth2", user: config.user, accessToken: config.accessToken }
+    : { user: config.user, pass: config.password };
+
   return nodemailer.createTransport({
     host:   config.host,
     port:   config.port || 587,
     secure: config.secure || false,  // true = port 465 (SSL), false = STARTTLS
-    auth: {
-      user: config.user,
-      pass: config.password,
-    },
+    auth,
     tls: {
       rejectUnauthorized: config.rejectUnauthorized !== false,
     },
@@ -71,13 +74,30 @@ async function sendEmail(config, message) {
 
 /**
  * Send from a stored account (reads credentials from DB).
+ * Uses OAuth2 if tokens are present; falls back to stored SMTP password.
  */
 async function sendFromAccount(accountId, db, message) {
-  const cred = db.prepare(
-    "SELECT * FROM smtp_credentials WHERE account_id = ?"
-  ).get(accountId);
+  const account = db.prepare("SELECT * FROM email_accounts WHERE id = ?").get(accountId);
+  if (!account) throw new Error("Account not found");
 
-  if (!cred) throw new Error("No SMTP credentials configured for this account");
+  // Try OAuth2 first
+  const accessToken = await getValidAccessToken(accountId, account.provider, db).catch(() => null);
+  if (accessToken) {
+    const smtpHosts = { gmail: "smtp.gmail.com", outlook: "smtp.office365.com" };
+    const host = smtpHosts[account.provider] || "smtp.gmail.com";
+    const config = {
+      user:        account.email,
+      accessToken,
+      host,
+      port:        587,
+      secure:      false,
+    };
+    return sendEmail(config, message);
+  }
+
+  // Fall back to stored SMTP password
+  const cred = db.prepare("SELECT * FROM smtp_credentials WHERE account_id = ?").get(accountId);
+  if (!cred) throw new Error("No SMTP credentials configured for this account. Connect via OAuth or enter your App Password.");
 
   const config = {
     user:     cred.smtp_user,

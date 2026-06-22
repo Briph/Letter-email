@@ -117,6 +117,25 @@ function getDb() {
       settings   TEXT NOT NULL DEFAULT '{}',
       updated_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
+    CREATE TABLE IF NOT EXISTS oauth_tokens (
+      account_id        TEXT NOT NULL REFERENCES email_accounts(id) ON DELETE CASCADE,
+      provider          TEXT NOT NULL,
+      access_token_enc  TEXT NOT NULL,
+      refresh_token_enc TEXT NOT NULL DEFAULT '',
+      expires_at        INTEGER NOT NULL DEFAULT 0,
+      scope             TEXT NOT NULL DEFAULT '',
+      updated_at        INTEGER NOT NULL DEFAULT (unixepoch()),
+      PRIMARY KEY (account_id, provider)
+    );
+    CREATE TABLE IF NOT EXISTS oauth_pending (
+      state      TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      user_id    TEXT NOT NULL,
+      provider   TEXT NOT NULL,
+      done       INTEGER NOT NULL DEFAULT 0,
+      error      TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
     CREATE INDEX IF NOT EXISTS idx_rt_user       ON refresh_tokens(user_id);
     CREATE INDEX IF NOT EXISTS idx_ea_user       ON email_accounts(user_id);
     CREATE INDEX IF NOT EXISTS idx_lbl_user      ON labels(user_id);

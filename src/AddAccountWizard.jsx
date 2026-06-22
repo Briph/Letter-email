@@ -4,11 +4,14 @@
  *
  * Steps:
  *   1. Pick provider (Gmail, Outlook, Yahoo, iCloud, Other / Manual)
- *   2. Enter password / app password + test
+ *   2. Enter password / app password + test  (or OAuth flow for Gmail/Outlook)
  *   3. Confirm and connect
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+
+// Providers that support OAuth2 (in addition to App Password)
+const OAUTH_PROVIDERS = new Set(["gmail", "outlook"]);
 
 const PROVIDER_ICONS = {
   gmail:      { emoji: "🔴", label: "Gmail" },
@@ -45,6 +48,11 @@ export default function AddAccountWizard({ account, onDone, onCancel, dark }) {
   const [testResult, setTestResult] = useState(null);
   const [error,      setError]      = useState("");
   const [connectedAccount, setConnectedAccount] = useState(null); // result stored for step 3
+
+  // OAuth2 flow state
+  const [oauthPending,  setOauthPending]  = useState(false); // waiting for browser window
+  const [oauthState,    setOauthState]    = useState(null);  // state token for polling
+  const pollRef = useRef(null);
 
   // ── Theme — defined early so render functions can reference it ─────────────
   const T = dark
@@ -136,6 +144,59 @@ export default function AddAccountWizard({ account, onDone, onCancel, dark }) {
     );
   }
 
+  // ── OAuth2 flow ────────────────────────────────────────────────────────────
+  async function handleOAuth() {
+    setError(""); setOauthPending(true);
+    try {
+      const token = localStorage.getItem("letter_access");
+      const r = await fetch(
+        `${process.env.REACT_APP_API_URL || "http://localhost:3001/api"}/oauth/start?provider=${selected}&accountId=${account.id}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const data = await r.json();
+      if (!r.ok) { setError(data.error || "Could not start OAuth"); setOauthPending(false); return; }
+
+      // Open the OAuth URL in a new browser window / Electron window
+      const win = window.open(data.url, "letter-oauth", "width=600,height=700,scrollbars=yes");
+      setOauthState(data.state);
+
+      // Poll the server for completion every 2 seconds
+      pollRef.current = setInterval(async () => {
+        try {
+          const t = localStorage.getItem("letter_access");
+          const pr = await fetch(
+            `${process.env.REACT_APP_API_URL || "http://localhost:3001/api"}/oauth/status/${data.state}`,
+            { headers: { Authorization: `Bearer ${t}` } }
+          );
+          const pd = await pr.json();
+          if (pd.error) {
+            clearInterval(pollRef.current);
+            setOauthPending(false);
+            setError(pd.error);
+          } else if (pd.done) {
+            clearInterval(pollRef.current);
+            setOauthPending(false);
+            if (win && !win.closed) try { win.close(); } catch {}
+            // Account is now connected — advance to success step
+            setConnectedAccount(account);
+            setStep(3);
+          } else if (win && win.closed) {
+            // User closed the window manually before completing
+            clearInterval(pollRef.current);
+            setOauthPending(false);
+            setError("Sign-in window was closed. Please try again.");
+          }
+        } catch { /* network blip — keep polling */ }
+      }, 2000);
+    } catch (err) {
+      setOauthPending(false);
+      setError("Could not reach server — is it running?");
+    }
+  }
+
+  // Clean up polling on unmount
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
   // ── Step 2: Credentials ────────────────────────────────────────────────────
   async function handleTest() {
     setError(""); setTestResult(null); setTesting(true);
@@ -200,6 +261,53 @@ export default function AddAccountWizard({ account, onDone, onCancel, dark }) {
             {PROVIDER_ICONS[selected]?.emoji} {provConf?.name || "Connect account"}
           </span>
         </div>
+
+        {/* OAuth2 sign-in button — shown for Gmail and Outlook */}
+        {OAUTH_PROVIDERS.has(selected) && (
+          <div style={{ marginBottom: 20 }}>
+            <button
+              onClick={handleOAuth}
+              disabled={oauthPending}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                background: oauthPending ? (dark ? "#2a2a2a" : "#e8e8e8") : (dark ? "#fff" : "#fff"),
+                color: dark ? "#111" : "#111",
+                border: `1px solid ${T.border}`, borderRadius: 9,
+                padding: "11px 16px", fontSize: 13, fontWeight: 600,
+                fontFamily: "inherit", cursor: oauthPending ? "default" : "pointer",
+                boxShadow: "0 1px 3px rgba(0,0,0,.08)",
+              }}
+            >
+              {oauthPending ? (
+                <>
+                  <Spinner />
+                  Waiting for sign-in…
+                </>
+              ) : selected === "gmail" ? (
+                <>
+                  <GoogleIcon />
+                  Sign in with Google
+                </>
+              ) : (
+                <>
+                  <MicrosoftIcon />
+                  Sign in with Microsoft
+                </>
+              )}
+            </button>
+            {oauthPending && (
+              <p style={{ fontSize: 11, color: T.sub, textAlign: "center", marginTop: 8 }}>
+                Complete sign-in in the browser window, then return here.
+              </p>
+            )}
+
+            <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0" }}>
+              <div style={{ flex: 1, height: 1, background: T.border }} />
+              <span style={{ fontSize: 11, color: T.sub }}>or use App Password</span>
+              <div style={{ flex: 1, height: 1, background: T.border }} />
+            </div>
+          </div>
+        )}
 
         {/* Auth note for known providers */}
         {provConf?.authNote && (
@@ -352,5 +460,37 @@ export default function AddAccountWizard({ account, onDone, onCancel, dark }) {
         )}
       </div>
     </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+      style={{ animation: "spin 0.8s linear infinite" }}>
+      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
+      <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+function GoogleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 48 48">
+      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+    </svg>
+  );
+}
+
+function MicrosoftIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 21 21">
+      <rect x="1"  y="1"  width="9" height="9" fill="#f25022"/>
+      <rect x="7"  y="1"  width="9" height="9" fill="#7fba00"/>
+      <rect x="1"  y="11" width="9" height="9" fill="#00a4ef"/>
+      <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+    </svg>
   );
 }

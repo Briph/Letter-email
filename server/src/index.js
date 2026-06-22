@@ -15,6 +15,7 @@ const accountsRouter = require("./routes/accounts");
 const labelsRouter   = require("./routes/labels");
 const settingsRouter = require("./routes/settings");
 const connectRouter  = require("./routes/connect");
+const oauthRouter    = require("./routes/oauth");
 
 // Trigger DB init on startup
 require("./db");
@@ -86,6 +87,7 @@ app.use("/api/auth", authRouter);
 // /api/accounts/:id/connect, /api/accounts/:id/test etc. are matched first.
 // Express routes in registration order and accountsRouter would 404 these paths.
 app.use("/api",          apiLimiter, connectRouter);
+app.use("/api/oauth",    apiLimiter, oauthRouter);
 app.use("/api/accounts", apiLimiter, accountsRouter);
 app.use("/api/labels",   apiLimiter, labelsRouter);
 app.use("/api/settings", apiLimiter, settingsRouter);
