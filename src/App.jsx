@@ -404,14 +404,14 @@ function SettingsPanel({ prefs, setPrefs, accounts, setAccounts, labels, setLabe
                       {a.isDefault?<span style={{fontSize:10,fontWeight:700,background:dark?"#fff":"#111",color:dark?"#111":"#fff",padding:"3px 8px",borderRadius:10,letterSpacing:"0.06em"}}>DEFAULT</span>
                         :<button onClick={()=>setDefault(a.id)} style={{background:"none",border:`1px solid ${T.border}`,borderRadius:7,padding:"4px 10px",fontSize:11,color:T.sub,cursor:"pointer",fontFamily:"inherit"}}>Set Default</button>}
                       <button onClick={()=>setEditSig(s=>s===a.id?null:a.id)} style={{background:"none",border:`1px solid ${T.border}`,borderRadius:7,padding:"4px 10px",fontSize:11,color:T.sub,cursor:"pointer",fontFamily:"inherit"}}>Signature</button>
-                      {currentUser&&(a.connected
+                      {a.connected
                         ?<>
                           <span style={{fontSize:10,color:"#4caf50",fontWeight:600}}>✓ Connected</span>
                           <button onClick={()=>syncAccount(a.id)} style={{background:"none",border:`1px solid ${T.border}`,borderRadius:7,padding:"4px 10px",fontSize:11,color:"#4a90d9",cursor:"pointer",fontFamily:"inherit"}}>Sync</button>
                           <button onClick={()=>disconnectAccount(a.id)} style={{background:"none",border:"1px solid #ffbbbb",borderRadius:7,padding:"4px 10px",fontSize:11,color:"#cc4444",cursor:"pointer",fontFamily:"inherit"}}>Disconnect</button>
                         </>
                         :<button onClick={()=>onConnectAccount?.(a)} style={{background:"#4a90d9",color:"#fff",border:"none",borderRadius:7,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Connect Inbox</button>
-                      )}
+                      }
                       <button onClick={()=>removeAccount(a.id)} style={{background:"none",border:"1px solid #ffbbbb",borderRadius:7,padding:"4px 10px",fontSize:11,color:"#cc4444",cursor:"pointer",fontFamily:"inherit"}}>Remove</button>
                     </div>
                   </div>
