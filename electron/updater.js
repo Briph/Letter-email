@@ -66,8 +66,14 @@ autoUpdater.on("update-downloaded", (info) => {
 
 autoUpdater.on("error", (err) => {
   log.error("[updater] Error:", err.message);
-  // Don't surface network errors to the UI (common when offline)
-  const silent = err.message.includes("net::") || err.message.includes("ENOTFOUND");
+  // Silence expected non-fatal errors so the UI doesn't show a scary error
+  const silent =
+    err.message.includes("net::")         ||  // network unavailable
+    err.message.includes("ENOTFOUND")     ||  // DNS failure / offline
+    err.message.includes("ECONNREFUSED")  ||  // no connection
+    err.message.includes("404")           ||  // no releases published yet
+    err.message.includes("No published")  ||  // "No published versions on GitHub"
+    err.message.includes("latest.yml");       // release exists but missing metadata
   send("updater:status", {
     type:    "error",
     message: silent ? null : err.message,
@@ -78,6 +84,10 @@ autoUpdater.on("error", (err) => {
 
 /** Manually trigger an update check */
 ipcMain.handle("updater:check", async () => {
+  if (!app.isPackaged) {
+    log.info("[updater] Dev mode — skipping manual check.");
+    return;
+  }
   try {
     await autoUpdater.checkForUpdates();
   } catch (e) {
